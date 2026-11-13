@@ -200,6 +200,34 @@ def chart_lead(sig10, peaks, lead):
         st.pyplot(plot_one_lead(sig10, peaks, lead))
 
 
+COMMON_FS = [100, 125, 128, 200, 250, 256, 300, 360, 400, 500, 512, 1000, 2000]
+
+
+def detect_fs(n_samples, file_bytes=None):
+    """Sampling rate of a CSV/NPY ECG: from a time column if there is one, otherwise assume a
+    standard 10-s recording and snap to the nearest common ECG rate. Returns (fs, how)."""
+    if file_bytes is not None:
+        try:
+            import io
+            df = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python")
+            tcol = [c for c in df.columns if str(c).strip().lower() in ("time", "t", "time (s)", "time_s", "seconds")]
+            if tcol:
+                dt = float(np.median(np.diff(df[tcol[0]].to_numpy(dtype=float))))
+                if dt > 0:
+                    fs = 1.0 / dt
+                    if fs > 5000:          # time column in milliseconds
+                        fs /= 1000.0
+                    if dt >= 1:            # e.g. milliseconds 0, 2, 4, ...
+                        fs = 1000.0 / dt
+                    return float(round(fs)), "from the time column"
+        except Exception:  # noqa: BLE001
+            pass
+    guess = n_samples / 10.0
+    near = min(COMMON_FS, key=lambda f: abs(f - guess))
+    fs = float(near if abs(near - guess) / guess < 0.06 else round(guess))
+    return fs, "assuming a 10-second recording"
+
+
 def choose(label, options, default, key, fmt=None):
     """Clickable chips if this Streamlit has them, otherwise horizontal radio buttons."""
     fmt = fmt or (lambda x: x)
@@ -243,6 +271,8 @@ with st.sidebar.expander("Model"):
     else:
         txt = st.text_area("Checkpoint path(s), one per line", value=str(project / "runs" / "mi_sspnet_v5_s1" / "best.pt"))
         ckpts = tuple(p.strip() for p in txt.splitlines() if p.strip())
+    fs_override = st.selectbox("Sampling rate of CSV / NPY uploads", ["Auto", 100, 250, 500, 1000],
+                               help="Auto reads it from a time column, or assumes a 10-second recording.")
     ncpu = os.cpu_count() or 2
     threads = st.slider("CPU threads", 1, max(1, ncpu), min(4, ncpu))
     verify = st.button("Verify model", help="Recomputes 20 validation ECGs and compares with the training notebook.")
@@ -319,10 +349,9 @@ with main_tab:
         sig, fs, names = pp.read_wfdb(EXAMPLES_DIR / e["record"])
         source, truth = f"PTB-XL #{e['ecg_id']}", e["true_class"]
     elif src == "Upload":
-        u1, u2 = st.columns([5, 1])
-        files = u1.file_uploader("12-lead ECG: CSV (lead names in header), WFDB (.hea + .dat) or NPY",
+        files = st.file_uploader("12-lead ECG: CSV (lead names in header), WFDB (.hea + .dat) or NPY",
                                  type=["hea", "dat", "csv", "txt", "npy"], accept_multiple_files=True)
-        fs_user = u2.number_input("Hz", 50.0, 2000.0, 500.0, 50.0, help="Sampling rate of a CSV / NPY file.")
+        fs_note = None
         if files:
             by_ext = {Path(f.name).suffix.lower(): f for f in files}
             try:
@@ -337,11 +366,18 @@ with main_tab:
                 elif ".csv" in by_ext or ".txt" in by_ext:
                     f = by_ext.get(".csv") or by_ext[".txt"]
                     sig, names = pp.read_table(f.getvalue(), f.name)
-                    fs, source = fs_user, f.name
+                    fs, how = detect_fs(len(sig), f.getvalue())
+                    if fs_override != "Auto":
+                        fs, how = float(fs_override), "set in Settings"
+                    fs_note, source = f"Sampling rate {fs:g} Hz ({how}).", f.name
                 elif ".npy" in by_ext:
                     f = by_ext[".npy"]
                     sig = np.load(f, allow_pickle=False)
-                    fs, names, source = fs_user, None, f.name
+                    n_ = sig.shape[0] if sig.ndim == 2 and sig.shape[1] == 12 else sig.shape[-1]
+                    fs, how = detect_fs(n_)
+                    if fs_override != "Auto":
+                        fs, how = float(fs_override), "set in Settings"
+                    fs_note, names, source = f"Sampling rate {fs:g} Hz ({how}).", None, f.name
             except Exception as ex:  # noqa: BLE001
                 st.error(f"Could not read the file: {ex}"); st.stop()
             if examples and examples.get("upload_example") and Path(source).name == examples["upload_example"]["file"]:
@@ -364,6 +400,8 @@ with main_tab:
         st.stop()
     try:
         sig100, notes = pp.prepare_signal(sig, fs, names)
+        if src == "Upload" and fs_note:
+            notes = [fs_note] + notes
     except Exception as ex:  # noqa: BLE001
         st.error(str(ex)); st.stop()
 
