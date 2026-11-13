@@ -231,9 +231,10 @@ def read_uploads(files, fs_override):
     recs, problems = [], []
     for stem, g in sorted(groups.items()):
         try:
-            if ".hea" in g or ".dat" in g:
-                if not (".hea" in g and ".dat" in g):
-                    problems.append(f"{stem}: needs both the .hea and the .dat file, skipped.")
+            if ".hea" in g or ".dat" in g or ".mat" in g or ".xyz" in g:
+                if ".hea" not in g or not ({".dat", ".mat"} & set(g)):
+                    problems.append(f"{stem}: a WFDB recording needs its .hea file and its signal file "
+                                    f"(.dat or .mat; PTB-DB also .xyz), skipped.")
                     continue
                 with tempfile.TemporaryDirectory() as td:
                     for f in g.values():
@@ -360,7 +361,7 @@ with st.container(border=True):
                     "or WFDB recordings (.hea and .dat together). Several ECGs at once are fine. Any sampling rate. PTB-XL files are checked "
                     "against the cardiologist's label.</div>", unsafe_allow_html=True)
         files = st.file_uploader("12-lead ECG: CSV (lead names in header), WFDB (.hea + .dat) or NPY",
-                                 type=["hea", "dat", "csv", "txt", "npy"], accept_multiple_files=True)
+                                 type=["hea", "dat", "mat", "xyz", "csv", "txt", "npy"], accept_multiple_files=True)
         if files:
             upload_recs, problems = read_uploads(files, fs_override)
             for p_ in problems:
