@@ -221,6 +221,57 @@ def choose(label, options, default, key, fmt=None):
     return st.radio(label, options, index=options.index(default), format_func=fmt, key=key,
                     horizontal=True, label_visibility="collapsed")
 
+def read_uploads(files, fs_override):
+    """Group uploaded files into recordings (.hea+.dat pairs by name, each CSV/NPY on its own).
+    Returns (records, problems)."""
+    groups = {}
+    for f in files:
+        p = Path(f.name)
+        groups.setdefault(p.stem, {})[p.suffix.lower()] = f
+    recs, problems = [], []
+    for stem, g in sorted(groups.items()):
+        try:
+            if ".hea" in g or ".dat" in g:
+                if not (".hea" in g and ".dat" in g):
+                    problems.append(f"{stem}: needs both the .hea and the .dat file, skipped.")
+                    continue
+                with tempfile.TemporaryDirectory() as td:
+                    for f in g.values():
+                        (Path(td) / f.name).write_bytes(f.getvalue())
+                    sig, fs, names = pp.read_wfdb(Path(td) / stem)
+                rec = dict(sig=sig, fs=fs, names=names, source=g[".hea"].name, fs_note=None)
+            elif ".csv" in g or ".txt" in g:
+                f = g.get(".csv") or g[".txt"]
+                sig, names = pp.read_table(f.getvalue(), f.name)
+                fs, how = detect_fs(len(sig), f.getvalue())
+                if fs_override != "Auto":
+                    fs, how = float(fs_override), "set in Settings"
+                rec = dict(sig=sig, fs=fs, names=names, source=f.name, fs_note=f"Sampling rate {fs:g} Hz ({how}).")
+            elif ".npy" in g:
+                f = g[".npy"]
+                sig = np.load(f, allow_pickle=False)
+                n_ = sig.shape[0] if sig.ndim == 2 and sig.shape[1] == 12 else sig.shape[-1]
+                fs, how = detect_fs(n_)
+                if fs_override != "Auto":
+                    fs, how = float(fs_override), "set in Settings"
+                rec = dict(sig=sig, fs=fs, names=None, source=f.name, fs_note=f"Sampling rate {fs:g} Hz ({how}).")
+            else:
+                continue
+        except Exception as ex:  # noqa: BLE001
+            problems.append(f"{stem}: could not be read ({ex}).")
+            continue
+        ref = ptbxl_reference(rec["source"])
+        truth = None
+        if examples and examples.get("upload_example") and Path(rec["source"]).name == examples["upload_example"]["file"]:
+            truth = examples["upload_example"]["true_class"]
+        if ref is not None:
+            rec["source"] = f"PTB-XL #{ref['ecg_id']}"
+            truth = ref["label"] if ref["label"] in CLASS_NAMES else None
+        rec.update(ref=ref, truth=truth)
+        recs.append(rec)
+    return recs, problems
+
+
 def step(n, title, hint=None):
     st.markdown(f"<div class='step'><span>{n}</span>{title}</div>" + (f"<div class='hint'>{hint}</div>" if hint else ""),
                 unsafe_allow_html=True)
@@ -288,7 +339,7 @@ st.markdown(
 
 # ------------------------------------------------------------------------------------------- step 1: choose an ECG
 sig, fs, names, source, truth = None, None, None, None, None
-fs_note, ref = None, None
+fs_note, ref, upload_recs = None, None, []
 with st.container(border=True):
     step(1, "Choose an ECG")
     sources = (["Examples"] if examples else []) + ["Upload"] + (["PTB-XL"] if Path(PTBXL_DEFAULT).is_dir() else [])
@@ -306,45 +357,16 @@ with st.container(border=True):
         source, truth = f"PTB-XL #{e['ecg_id']}", e["true_class"]
     elif src == "Upload":
         st.markdown("<div class='hint'>A CSV with one column per lead (I, II, III, aVR, aVL, aVF, V1–V6), "
-                    "or a WFDB recording (.hea and .dat together). Any sampling rate. PTB-XL files are checked "
+                    "or WFDB recordings (.hea and .dat together). Several ECGs at once are fine. Any sampling rate. PTB-XL files are checked "
                     "against the cardiologist's label.</div>", unsafe_allow_html=True)
         files = st.file_uploader("12-lead ECG: CSV (lead names in header), WFDB (.hea + .dat) or NPY",
                                  type=["hea", "dat", "csv", "txt", "npy"], accept_multiple_files=True)
-        fs_note = None
         if files:
-            by_ext = {Path(f.name).suffix.lower(): f for f in files}
-            try:
-                if ".hea" in by_ext:
-                    if ".dat" not in by_ext:
-                        st.error("WFDB needs both the .hea and the .dat file."); st.stop()
-                    with tempfile.TemporaryDirectory() as td:
-                        for f in files:
-                            (Path(td) / f.name).write_bytes(f.getvalue())
-                        sig, fs, names = pp.read_wfdb(Path(td) / Path(by_ext[".hea"].name).stem)
-                    source = by_ext[".hea"].name
-                    ref = ptbxl_reference(source)
-                elif ".csv" in by_ext or ".txt" in by_ext:
-                    f = by_ext.get(".csv") or by_ext[".txt"]
-                    sig, names = pp.read_table(f.getvalue(), f.name)
-                    fs, how = detect_fs(len(sig), f.getvalue())
-                    if fs_override != "Auto":
-                        fs, how = float(fs_override), "set in Settings"
-                    fs_note, source = f"Sampling rate {fs:g} Hz ({how}).", f.name
-                elif ".npy" in by_ext:
-                    f = by_ext[".npy"]
-                    sig = np.load(f, allow_pickle=False)
-                    n_ = sig.shape[0] if sig.ndim == 2 and sig.shape[1] == 12 else sig.shape[-1]
-                    fs, how = detect_fs(n_)
-                    if fs_override != "Auto":
-                        fs, how = float(fs_override), "set in Settings"
-                    fs_note, names, source = f"Sampling rate {fs:g} Hz ({how}).", None, f.name
-            except Exception as ex:  # noqa: BLE001
-                st.error(f"Could not read the file: {ex}"); st.stop()
-            if examples and examples.get("upload_example") and Path(source).name == examples["upload_example"]["file"]:
-                truth = examples["upload_example"]["true_class"]
-            if ref is not None:
-                source = f"PTB-XL #{ref['ecg_id']} (uploaded)"
-                truth = ref["label"] if ref["label"] in CLASS_NAMES else None
+            upload_recs, problems = read_uploads(files, fs_override)
+            for p_ in problems:
+                st.warning(p_, icon="📄")
+            if len(upload_recs) > 1:
+                st.caption(f"{len(upload_recs)} ECGs uploaded.")
 
     else:
         ecg_id = st.number_input("PTB-XL ecg_id", 1, 21837, 1, 1)
@@ -359,14 +381,63 @@ with st.container(border=True):
         except Exception as ex:  # noqa: BLE001
             st.error(f"Could not load PTB-XL record: {ex}"); st.stop()
 
-if sig is None:
+if src == "Upload":
+    recs = upload_recs
+else:
+    recs = [] if sig is None else [dict(sig=sig, fs=fs, names=names, source=source, truth=truth, ref=ref, fs_note=None)]
+if not recs:
     st.stop()
-try:
-    sig100, notes = pp.prepare_signal(sig, fs, names)
-    if src == "Upload" and fs_note:
-        notes = [fs_note] + notes
-except Exception as ex:  # noqa: BLE001
-    st.error(f"This file could not be used: {ex}"); st.stop()
+
+
+def prep(rec):
+    s100, nts = pp.prepare_signal(rec["sig"], rec["fs"], rec["names"])
+    return s100, ([rec["fs_note"]] if rec.get("fs_note") else []) + nts
+
+
+batch = len(recs) > 1
+if batch:
+    prog = st.progress(0.0, text=f"Analysing {len(recs)} ECGs...")
+    for i, rec in enumerate(recs):
+        try:
+            s100, nts = prep(rec)
+            rb = analyse(model, model_key, s100, False)
+            rec.update(sig100=s100, notes=nts, cls=CLASS_NAMES[rb["label"]], hr=rb["nb"] * 6)
+        except Exception as ex:  # noqa: BLE001
+            rec.update(error=str(ex))
+        prog.progress((i + 1) / len(recs), text=f"Analysing {len(recs)} ECGs...")
+    prog.empty()
+    ok_recs = [x for x in recs if "error" not in x]
+    with st.container(border=True):
+        step(2, f"Results for {len(recs)} ECGs")
+        labelled = [x for x in ok_recs if x["truth"]]
+        agree = sum(x["cls"] == x["truth"] for x in labelled)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("ECGs analysed", len(ok_recs))
+        m2.metric("MI detected", sum(x["cls"] != "NORM" for x in ok_recs))
+        m3.metric("Same as cardiologist", f"{agree} of {len(labelled)}" if labelled else "no labels")
+        rows_ = []
+        for x in recs:
+            if "error" in x:
+                rows_.append({"ECG": x["source"], "Result": "could not analyse", "Cardiologist": "", "Match": "", "Heart rate": ""})
+                continue
+            card_ = NICE[x["truth"]] if x["truth"] else (x["ref"]["codes"] if x.get("ref") else "no label")
+            match_ = ("✓" if x["cls"] == x["truth"] else "✗") if x["truth"] else "–"
+            rows_.append({"ECG": x["source"], "Result": NICE[x["cls"]], "Cardiologist": card_, "Match": match_,
+                          "Heart rate": f"~{x['hr']} bpm"})
+        st.dataframe(pd.DataFrame(rows_), use_container_width=True, hide_index=True)
+        if not ok_recs:
+            st.stop()
+        pick = st.selectbox("Show details for", list(range(len(ok_recs))),
+                            format_func=lambda i: f"{ok_recs[i]['source']}  →  {NICE[ok_recs[i]['cls']]}")
+    rec = ok_recs[pick]
+    sig100, notes = rec["sig100"], rec["notes"]
+else:
+    rec = recs[0]
+    try:
+        sig100, notes = prep(rec)
+    except Exception as ex:  # noqa: BLE001
+        st.error(f"This file could not be used: {ex}"); st.stop()
+source, truth, ref = rec["source"], rec["truth"], rec["ref"]
 
 with st.spinner("Analysing the ECG..."):
     r = analyse(model, model_key, sig100, explain)
@@ -376,7 +447,10 @@ key_leads = [pp.LEADS[i] for i in np.argsort(imp)[::-1][:3]] if imp is not None 
 
 # ------------------------------------------------------------------------------------------- step 2: result
 with st.container(border=True):
-    step(2, "Result")
+    if batch:
+        step("▸", f"Details: {source}")
+    else:
+        step(2, "Result")
     title, icon, text = VERDICT[cls]
     col = GREEN if cls == "NORM" else RED
     chips = f"<span class='chip'>❤ Heart rate ~{r['nb'] * 6} bpm</span><span class='chip'>⏱ {r['seconds']:.1f} s</span>"
