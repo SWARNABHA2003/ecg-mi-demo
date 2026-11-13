@@ -196,7 +196,7 @@ with st.sidebar.expander("Model settings", expanded=False):
 
 st.title("❤️ ECG myocardial infarction screening")
 st.caption("12-lead ECG → normal / inferior MI / anteroseptal MI · ensemble of three dual-branch attention CNNs "
-           "trained on PTB-XL · runs fully offline on this laptop")
+           "trained on PTB-XL · runs on a CPU in a few seconds")
 
 try:
     model = load_model(ens_dir, str(project), threads, ckpts)
@@ -345,13 +345,13 @@ with main_tab:
     nwin = len(r["win_starts"])
 
     st.subheader(source)
-    c1, c2 = st.columns([1.1, 1])
+    c1, _ = st.columns([1.4, 1])
     with c1:
         st.markdown(
             f"<div class='result-card' style='background:{CLASS_COLOR[cls]}14;border:1px solid {CLASS_COLOR[cls]}55'>"
-            f"<div class='metric-small'>Model output</div>"
-            f"<div style='font-size:36px;font-weight:700;color:{CLASS_COLOR[cls]}'>{cls}</div>"
-            f"<div style='font-size:18px;font-weight:600;color:{INK}'>{CLASS_LONG[cls]}</div>"
+            f"<div class='metric-small'>Result</div>"
+            f"<div style='font-size:40px;font-weight:700;color:{CLASS_COLOR[cls]}'>{cls}</div>"
+            f"<div style='font-size:20px;font-weight:600;color:{INK}'>{CLASS_LONG[cls]}</div>"
             f"<div style='margin-top:6px;color:{INK}'>{CLASS_TEXT[cls]}</div></div>",
             unsafe_allow_html=True)
         if truth:
@@ -359,27 +359,16 @@ with main_tab:
                 st.success(f"Cardiologist label: **{truth}** — the model agrees ✓")
             else:
                 st.error(f"Cardiologist label: **{truth}** — the model says {cls} ✗")
-        votes = [CLASS_NAMES[int(np.argmax(m_))] for m_ in r["member"]]
-        st.caption(f"Network votes: {' · '.join(votes)}  |  {nwin} × 10-s window(s)  |  "
-                   f"{r['nb']} beats (~{r['nb'] * 6} bpm)  |  analysed in {r['seconds']:.1f} s on CPU")
-    with c2:
-        prob_bars(r["p_adj"], "Probabilities (after the decision rule)")
-        with st.expander("Per-network probabilities"):
-            tab = pd.DataFrame(r["member"], columns=CLASS_NAMES,
-                               index=[f"Network {i + 1}" for i in range(len(r["member"]))])
-            tab.loc["Ensemble mean"] = r["p_rec"]
-            tab.loc["After offsets"] = r["p_adj"]
-            st.dataframe(tab.style.format("{:.3f}"), use_container_width=True)
+        st.caption(f"{r['nb']} beats (~{r['nb'] * 6} bpm)  |  analysed in {r['seconds']:.1f} s")
 
     for n in notes:
         st.caption("ℹ️ " + n)
     for f in r["flags"]:
         st.warning(f, icon="🔎")
     if nwin > 1:
-        wt = pd.DataFrame(r["win_prob"], columns=CLASS_NAMES)
-        wt.insert(0, "start (s)", [s / pp.FS for s in r["win_starts"]])
-        wt.insert(1, "prediction", [CLASS_NAMES[i] for i in r["win_label"]])
-        st.dataframe(wt.style.format({c_: "{:.3f}" for c_ in CLASS_NAMES}), use_container_width=True, hide_index=True)
+        wt = pd.DataFrame({"start (s)": [s / pp.FS for s in r["win_starts"]],
+                           "result": [CLASS_NAMES[i] for i in r["win_label"]]})
+        st.dataframe(wt, use_container_width=True, hide_index=True)
 
     imp = r["imp"]
     t1, t2, t3, t4 = st.tabs(["Median beats", "Lead importance", "12-lead ECG", "Model input images"])
@@ -407,9 +396,7 @@ with main_tab:
     report = dict(
         source=source, analysed_at=datetime.now().isoformat(timespec="seconds"),
         prediction=cls, description=CLASS_LONG[cls], reference_label=truth,
-        probabilities_after_decision_rule=dict(zip(CLASS_NAMES, np.round(r["p_adj"], 4).tolist())),
-        ensemble_mean_probabilities=dict(zip(CLASS_NAMES, np.round(r["p_rec"], 4).tolist())),
-        decision_offsets=np.round(model.bias, 3).tolist(), n_windows=nwin, beats=int(r["nb"]),
+        n_windows=nwin, beats=int(r["nb"]),
         quality_flags=r["flags"], preprocessing_notes=notes,
         lead_importance=None if imp is None else dict(zip(pp.LEADS, np.round(imp, 4).tolist())),
         disclaimer="Research prototype, not a medical device.")
