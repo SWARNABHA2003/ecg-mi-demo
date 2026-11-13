@@ -1,0 +1,101 @@
+{
+  "fold": 9,
+  "examples": [
+    {
+      "ecg_id": 17628,
+      "record": "17628_lr",
+      "true_class": "NORM",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 37,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 12073,
+      "record": "12073_lr",
+      "true_class": "NORM",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 52,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 6111,
+      "record": "06111_lr",
+      "true_class": "NORM",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 71,
+      "sex": "female"
+    },
+    {
+      "ecg_id": 4209,
+      "record": "04209_lr",
+      "true_class": "IMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 64,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 10282,
+      "record": "10282_lr",
+      "true_class": "IMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 76,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 8761,
+      "record": "08761_lr",
+      "true_class": "IMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 70,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 7790,
+      "record": "07790_lr",
+      "true_class": "ASMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 63,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 1440,
+      "record": "01440_lr",
+      "true_class": "ASMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 48,
+      "sex": "female"
+    },
+    {
+      "ecg_id": 5927,
+      "record": "05927_lr",
+      "true_class": "ASMI",
+      "fold": 9,
+      "kind": "showcase",
+      "age": 53,
+      "sex": "male"
+    },
+    {
+      "ecg_id": 5478,
+      "record": "05478_lr",
+      "true_class": "IMI",
+      "fold": 9,
+      "kind": "hard case",
+      "age": 54,
+      "sex": "male"
+    }
+  ],
+  "upload_example": {
+    "file": "ecg_machine_export_4209_500Hz_uV.csv",
+    "ecg_id": 4209,
+    "true_class": "IMI",
+    "sampling_rate": 500
+  }
+}

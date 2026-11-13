@@ -1,0 +1,9 @@
+# CPU-only PyTorch (small download; used by the setup scripts and by Streamlit Community Cloud)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+streamlit>=1.30
+numpy
+scipy
+pandas
+matplotlib
+wfdb
